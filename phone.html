@@ -1,37 +1,249 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Phone Cam</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bridge to Mobile</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
-  body{margin:0;background:#000;color:#fff;font-family:sans-serif;text-align:center}
-  video{width:100%;max-height:75vh;transform:scaleX(-1)}
-  button{padding:14px 28px;font-size:18px;margin:12px}
+  body { font-family: -apple-system, sans-serif; }
+  .tab-active { background-color: #4f46e5; color: #fff; }
+  .pulse-rec { animation: pulse 1.2s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.6); } 70% { box-shadow: 0 0 0 14px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
+  #toast { transition: all .3s ease; transform: translateY(150%); }
+  #toast.show { transform: translateY(0); }
+  video { width: 100%; max-height: 35vh; border-radius: 8px; background: #000; }
 </style>
 </head>
-<body>
-  <video id="v" autoplay playsinline muted></video>
-  <p id="s">Start dabao</p>
-  <button id="start">Start Camera</button>
+<body class="bg-gray-100 min-h-screen pb-10">
+
+  <div id="invalid-session" class="hidden fixed inset-0 bg-white z-50 flex flex-col items-center justify-center p-6 text-center">
+    <div class="text-5xl mb-4">⚠️</div>
+    <h1 class="text-xl font-bold text-gray-800 mb-2">Invalid or Expired Link</h1>
+    <p class="text-gray-500">Please generate a new Bridge link from your laptop.</p>
+  </div>
+
+  <header class="bg-indigo-600 text-white p-4 shadow-md sticky top-0 z-40">
+    <h1 class="text-lg font-bold flex items-center gap-2">🔗 Bridge to Mobile</h1>
+    <p id="session-label" class="text-xs opacity-80">Session: —</p>
+  </header>
+
+  <main id="app" class="max-w-md mx-auto p-4 hidden">
+
+    <div class="flex bg-white rounded-xl shadow p-1 mb-4">
+      <button data-tab="text" class="tab-btn flex-1 py-2 rounded-lg text-sm font-semibold tab-active">📝 Text</button>
+      <button data-tab="live" class="tab-btn flex-1 py-2 rounded-lg text-sm font-semibold">🎤 Live</button>
+      <button data-tab="camera" class="tab-btn flex-1 py-2 rounded-lg text-sm font-semibold">📷 Photo</button>
+    </div>
+
+    <!-- TEXT PANEL -->
+    <section id="panel-text" class="bg-white rounded-xl shadow p-4 space-y-3">
+      <div class="flex justify-between items-center">
+        <label class="font-semibold text-gray-700">Type or Speak Text</label>
+        <button id="mic-toggle" class="bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1.5 rounded-full">🎤 Speak</button>
+      </div>
+      <textarea id="text-input" rows="5" placeholder="Type here... or tap Speak"
+        class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
+      <button id="send-text-btn" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg active:scale-95 transition">
+        🚀 Send Text to Laptop
+      </button>
+    </section>
+
+    <!-- LIVE STREAM & RECORD PANEL -->
+    <section id="panel-live" class="bg-white rounded-xl shadow p-4 space-y-3 hidden">
+      <label class="font-semibold text-gray-700 block">Live Voice / Video Stream</label>
+      <video id="live-preview" autoplay playsinline muted></video>
+      <p id="live-status" class="text-center text-sm text-gray-500">Start dabao aur live mic/camera chalu karo</p>
+      
+      <div class="flex gap-2">
+        <button id="start-live-btn" class="flex-1 bg-green-500 text-white font-bold py-3 rounded-lg active:scale-95 transition">▶️ Go Live</button>
+        <button id="stop-live-btn" class="flex-1 bg-red-500 text-white font-bold py-3 rounded-lg active:scale-95 transition hidden">⏹️ Stop</button>
+      </div>
+
+      <button id="record-btn" disabled class="w-full bg-gray-800 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg active:scale-95 transition">
+        ⏺️ Start Recording
+      </button>
+    </section>
+
+    <!-- CAMERA PANEL -->
+    <section id="panel-camera" class="bg-white rounded-xl shadow p-4 space-y-4 hidden">
+      <label class="font-semibold text-gray-700 block">Capture Photo</label>
+      <label for="camera-input" class="block w-full text-center bg-indigo-50 border-2 border-dashed border-indigo-300 rounded-lg py-8 text-indigo-600 font-semibold cursor-pointer">
+        📷 Tap to Open Camera
+      </label>
+      <input id="camera-input" type="file" accept="image/*" capture="environment" class="hidden">
+      <img id="image-preview" class="w-full rounded-lg hidden" />
+      <button id="send-image-btn" disabled class="w-full bg-indigo-600 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg active:scale-95 transition">
+        🚀 Send Photo to Laptop
+      </button>
+    </section>
+
+  </main>
+
+  <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-3 rounded-full shadow-lg z-50"></div>
+
 <script>
-const id = new URLSearchParams(location.search).get('id');
-const s = document.getElementById('s');
-document.getElementById('start').onclick = async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false
+  // ===============================================================
+  // APNA FIREBASE CONFIG YAHAN PASTE KARO
+  // ===============================================================
+  const firebaseConfig = {
+    apiKey: "YAHAN_APNI_API_KEY",
+    authDomain: "YAHAN_APNA_DOMAIN",
+    databaseURL: "YAHAN_APNA_DATABASE_URL",
+    projectId: "YAHAN_APNA_PROJECT_ID",
+    storageBucket: "YAHAN_APNA_BUCKET",
+    messagingSenderId: "YAHAN_APNI_ID",
+    appId: "YAHAN_APNA_APP_ID"
+  };
+  // ===============================================================
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  const params = new URLSearchParams(window.location.search);
+  const sessionId = params.get('session');
+  const peerId = params.get('id'); // Laptop ka Peer ID
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast'); t.textContent = msg; t.style.background = isError ? '#dc2626' : '#111827';
+    t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  async function bootstrap() {
+    if (!sessionId) return showInvalid();
+    const snap = await db.ref('sessions/' + sessionId).once('value');
+    if (!snap.exists()) return showInvalid();
+    document.getElementById('session-label').textContent = 'Session: ' + sessionId;
+    document.getElementById('app').classList.remove('hidden');
+  }
+
+  function showInvalid(msg) { document.getElementById('invalid-session').classList.remove('hidden'); if (msg) document.querySelector('#invalid-session p').textContent = msg; }
+  bootstrap();
+
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('tab-active'));
+      btn.classList.add('tab-active');
+      ['text', 'live', 'camera'].forEach((name) => { document.getElementById('panel-' + name).classList.toggle('hidden', name !== btn.dataset.tab); });
     });
-    document.getElementById('v').srcObject = stream;
-    const peer = new Peer();
-    peer.on('open', () => {
-      peer.call(id, stream);
-      s.textContent = 'Connected ✅ (is page ko khula rakho)';
-    });
-    peer.on('error', e => s.textContent = 'Error: ' + e.type);
-  } catch (e) { s.textContent = 'Camera error: ' + e.message; }
-};
+  });
+
+  // ---- TEXT LOGIC ----
+  const textInput = document.getElementById('text-input');
+  const micBtn = document.getElementById('mic-toggle');
+  let recognition, listening = false;
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition(); recognition.continuous = true; recognition.interimResults = true; recognition.lang = 'en-US';
+    let finalTranscript = '';
+    recognition.onresult = (e) => { let interim = ''; for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) finalTranscript += t + ' '; else interim += t; } textInput.value = (finalTranscript + interim).trim(); };
+    recognition.onend = () => { if (listening) recognition.start(); };
+  } else { micBtn.disabled = true; micBtn.textContent = '🎤 N/A'; }
+
+  micBtn.addEventListener('click', () => {
+    if (!recognition) return; listening = !listening;
+    if (listening) { recognition.start(); micBtn.textContent = '⏹ Stop'; micBtn.classList.add('bg-red-100', 'text-red-700'); }
+    else { recognition.stop(); micBtn.textContent = '🎤 Speak'; micBtn.classList.remove('bg-red-100', 'text-red-700'); }
+  });
+
+  document.getElementById('send-text-btn').addEventListener('click', async () => {
+    const v = textInput.value.trim(); if (!v) return showToast('Type something first.', true);
+    await db.ref('sessions/' + sessionId + '/payload/text_fields').set({ field_1: v });
+    showToast('✅ Text synced to laptop!');
+  });
+
+  // ---- LIVE STREAM & RECORD LOGIC (PeerJS) ----
+  let liveStream = null;
+  let peer = null;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let isRecording = false;
+
+  document.getElementById('start-live-btn').addEventListener('click', async () => {
+    try {
+      liveStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: true });
+      document.getElementById('live-preview').srcObject = liveStream;
+      
+      peer = new Peer();
+      peer.on('open', () => {
+        if (peerId) {
+          const call = peer.call(peerId, liveStream);
+          document.getElementById('live-status').textContent = '🟢 Live! Laptop pe dikh raha hai.';
+          document.getElementById('record-btn').disabled = false;
+        } else {
+          document.getElementById('live-status').textContent = '⚠️ Live peer ID nahi mila.';
+        }
+      });
+      peer.on('error', (e) => { document.getElementById('live-status').textContent = 'Error: ' + e.type; });
+
+      document.getElementById('start-live-btn').classList.add('hidden');
+      document.getElementById('stop-live-btn').classList.remove('hidden');
+    } catch (e) { showToast('Camera/Mic error: ' + e.message, true); }
+  });
+
+  document.getElementById('stop-live-btn').addEventListener('click', () => {
+    if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
+    if (peer) { peer.destroy(); peer = null; }
+    if (isRecording) { mediaRecorder.stop(); isRecording = false; }
+    document.getElementById('live-preview').srcObject = null;
+    document.getElementById('live-status').textContent = 'Stream band ho gaya.';
+    document.getElementById('start-live-btn').classList.remove('hidden');
+    document.getElementById('stop-live-btn').classList.add('hidden');
+    document.getElementById('record-btn').disabled = true;
+    document.getElementById('record-btn').textContent = '⏺️ Start Recording';
+  });
+
+  document.getElementById('record-btn').addEventListener('click', () => {
+    if (!isRecording && liveStream) {
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(liveStream, { mimeType: 'video/webm;codecs=vp9,opus' || 'video/webm' });
+      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        showToast('Processing recording...');
+        const base64 = await blobToBase64(blob);
+        await db.ref('sessions/' + sessionId + '/payload/video_recording').set({ mime_type: 'video/webm', data_base64: base64 });
+        showToast('✅ Recording sent to laptop!');
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      document.getElementById('record-btn').textContent = '⏹️ Stop & Send Recording';
+      document.getElementById('record-btn').classList.add('bg-red-600');
+      document.getElementById('live-status').textContent = '🔴 Recording...';
+    } else if (isRecording) {
+      mediaRecorder.stop();
+      isRecording = false;
+      document.getElementById('record-btn').textContent = '⏺️ Start Recording';
+      document.getElementById('record-btn').classList.remove('bg-red-600');
+      document.getElementById('live-status').textContent = '🟢 Live! Recording save ho rahi hai...';
+    }
+  });
+
+  // ---- CAMERA PHOTO LOGIC ----
+  const cameraInput = document.getElementById('camera-input');
+  const imagePreview = document.getElementById('image-preview');
+  const sendImageBtn = document.getElementById('send-image-btn');
+  let imageBase64 = null;
+
+  cameraInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    imageBase64 = await blobToBase64(file);
+    imagePreview.src = imageBase64; imagePreview.classList.remove('hidden'); sendImageBtn.disabled = false;
+  });
+
+  sendImageBtn.addEventListener('click', async () => {
+    if (!imageBase64) return; sendImageBtn.disabled = true; sendImageBtn.textContent = 'Uploading...';
+    await db.ref('sessions/' + sessionId + '/payload/captured_image').set({ mime_type: 'image/jpeg', data_base64: imageBase64 });
+    sendImageBtn.textContent = '✅ Sent!'; showToast('✅ Photo synced!');
+    setTimeout(() => { sendImageBtn.textContent = '🚀 Send Photo to Laptop'; sendImageBtn.disabled = false; }, 2000);
+  });
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => { const r = new FileReader(); r.onloadend = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(blob); });
+  }
 </script>
 </body>
 </html>
