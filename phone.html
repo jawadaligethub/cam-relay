@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bridge Mobile Camera</title>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #101827;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+
+    header {
+      background: #4f46e5;
+      padding: 15px;
+      text-align: center;
+    }
+
+    header h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    #status {
+      margin-top: 7px;
+      font-size: 13px;
+      opacity: .9;
+    }
+
+    main {
+      max-width: 600px;
+      margin: auto;
+      padding: 15px;
+    }
+
+    .box {
+      background: #1f2937;
+      border-radius: 14px;
+      padding: 15px;
+      margin-bottom: 15px;
+    }
+
+    h3 {
+      margin: 0 0 12px;
+      font-size: 17px;
+    }
+
+    video, img {
+      width: 100%;
+      border-radius: 10px;
+      background: black;
+      max-height: 55vh;
+      object-fit: cover;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      border-radius: 10px;
+      padding: 12px;
+      border: none;
+      font-size: 16px;
+      resize: vertical;
+    }
+
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 10px;
+      padding: 14px;
+      margin-top: 10px;
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    .green { background: #16a34a; }
+    .red { background: #dc2626; }
+    .blue { background: #4f46e5; }
+    .orange { background: #ea580c; }
+    .hidden { display: none; }
+
+    #message {
+      position: fixed;
+      bottom: 18px;
+      left: 50%;
+      width: 90%;
+      max-width: 500px;
+      transform: translateX(-50%);
+      background: #111827;
+      padding: 13px;
+      border-radius: 10px;
+      text-align: center;
+      display: none;
+      z-index: 100;
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+  <h2>📱 Bridge to Laptop</h2>
+  <div id="status">Connecting to laptop...</div>
+</header>
+
+<main>
+
+  <!-- TEXT -->
+  <div class="box">
+    <h3>📝 Send Text</h3>
+
+    <textarea id="textInput" placeholder="Yahan type karein..."></textarea>
+
+    <button id="sendTextBtn" class="blue">
+      Send Text to Laptop
+    </button>
+  </div>
+
+  <!-- CAMERA / LIVE -->
+  <div class="box">
+    <h3>📷 Mobile Camera + Live Mic</h3>
+
+    <!-- Ye mobile camera ka preview hai -->
+    <video id="cameraPreview" autoplay playsinline muted></video>
+
+    <button id="startCameraBtn" class="green">
+      📷 Open Mobile Camera
+    </button>
+
+    <button id="takePhotoBtn" class="blue hidden">
+      📸 Take Photo & Send to Laptop
+    </button>
+
+    <button id="startLiveBtn" class="orange hidden">
+      🔴 Start Live Video + Voice
+    </button>
+
+    <button id="stopCameraBtn" class="red hidden">
+      ⏹ Stop Camera / Live
+    </button>
+  </div>
+
+  <!-- PHOTO PREVIEW -->
+  <div id="photoBox" class="box hidden">
+    <h3>Photo Preview</h3>
+    <img id="photoPreview">
+  </div>
+
+</main>
+
+<div id="message"></div>
+
+<script>
+  // Extension generated link mein ?id=XXXXX hota hai
+  const laptopPeerId = new URLSearchParams(location.search).get('id');
+
+  const statusEl = document.getElementById('status');
+  const cameraPreview = document.getElementById('cameraPreview');
+  const photoPreview = document.getElementById('photoPreview');
+
+  const startCameraBtn = document.getElementById('startCameraBtn');
+  const takePhotoBtn = document.getElementById('takePhotoBtn');
+  const startLiveBtn = document.getElementById('startLiveBtn');
+  const stopCameraBtn = document.getElementById('stopCameraBtn');
+
+  let peer = null;
+  let dataConn = null;
+  let mobileStream = null;
+  let liveCall = null;
+
+  function showMessage(text, isError = false) {
+    const box = document.getElementById('message');
+    box.textContent = text;
+    box.style.background = isError ? '#b91c1c' : '#111827';
+    box.style.display = 'block';
+
+    setTimeout(() => {
+      box.style.display = 'none';
+    }, 3500);
+  }
+
+  // Agar link mein laptop ID nahi hai
+  if (!laptopPeerId) {
+    statusEl.textContent = '❌ Invalid link. Laptop extension se naya link generate karein.';
+    showMessage('Invalid link. Laptop se naya Bridge link bhejein.', true);
+  } else {
+    connectToLaptop();
+  }
+
+  // ----------------------------------------------------------
+  // LAPTOP SE PEERJS CONNECTION
+  // ----------------------------------------------------------
+  function connectToLaptop() {
+    statusEl.textContent = 'Connecting to laptop...';
+
+    peer = new Peer();
+
+    peer.on('open', () => {
+      // Text aur photo bhejne ke liye data connection
+      dataConn = peer.connect(laptopPeerId, {
+        reliable: true,
+        serialization: 'json'
+      });
+
+      dataConn.on('open', () => {
+        statusEl.textContent = '🟢 Connected to Laptop ✅';
+        showMessage('Connected to Laptop ✅');
+      });
+
+      dataConn.on('close', () => {
+        statusEl.textContent = '🔴 Laptop disconnected.';
+      });
+
+      dataConn.on('error', (error) => {
+        statusEl.textContent = '❌ Connection Error';
+        showMessage('Connection error: ' + error.type, true);
+      });
+    });
+
+    peer.on('error', (error) => {
+      console.log(error);
+      statusEl.textContent = '❌ Peer error: ' + error.type;
+      showMessage('Peer Error: ' + error.type, true);
+    });
+  }
+
+  function isConnected() {
+    return dataConn && dataConn.open;
+  }
+
+  // ----------------------------------------------------------
+  // TEXT SEND
+  // ----------------------------------------------------------
+  document.getElementById('sendTextBtn').addEventListener('click', () => {
+    const text = document.getElementById('textInput').value.trim();
+
+    if (!text) {
+      showMessage('Pehle kuch type karein.', true);
+      return;
+    }
+
+    if (!isConnected()) {
+      showMessage('Laptop se connection abhi ready nahi.', true);
+      return;
+    }
+
+    dataConn.send({
+      type: 'text',
+      value: text
+    });
+
+    showMessage('✅ Text laptop ko bhej diya.');
+  });
+
+  // ----------------------------------------------------------
+  // MOBILE CAMERA OPEN
+  // ----------------------------------------------------------
+  startCameraBtn.addEventListener('click', async () => {
+    try {
+      // facingMode: environment = back camera
+      // Yani phone ka rear/mobile camera open hoga
+      mobileStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: true
+      });
+
+      cameraPreview.srcObject = mobileStream;
+
+      startCameraBtn.classList.add('hidden');
+      takePhotoBtn.classList.remove('hidden');
+      startLiveBtn.classList.remove('hidden');
+      stopCameraBtn.classList.remove('hidden');
+
+      showMessage('📷 Mobile camera open ho gaya.');
+    } catch (error) {
+      console.log(error);
+      showMessage('Camera/Mic permission allow karein: ' + error.message, true);
+    }
+  });
+
+  // ----------------------------------------------------------
+  // PHOTO CAPTURE KARKE LAPTOP BHEJNA
+  // ----------------------------------------------------------
+  takePhotoBtn.addEventListener('click', () => {
+    if (!mobileStream) {
+      showMessage('Pehle camera open karein.', true);
+      return;
+    }
+
+    if (!isConnected()) {
+      showMessage('Laptop se connection ready nahi.', true);
+      return;
+    }
+
+    const videoTrack = mobileStream.getVideoTracks()[0];
+    const settings = videoTrack.getSettings();
+
+    const canvas = document.createElement('canvas');
+
+    // Photo size choti rakhi hai taake PeerJS se send ho sake
+    const width = Math.min(settings.width || 1280, 1280);
+    const height = Math.min(settings.height || 720, 720);
+
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(cameraPreview, 0, 0, width, height);
+
+    // Quality .75 rakhi hai taake file bahut heavy na bane
+    const imageBase64 = canvas.toDataURL('image/jpeg', 0.75);
+
+    photoPreview.src = imageBase64;
+    document.getElementById('photoBox').classList.remove('hidden');
+
+    dataConn.send({
+      type: 'image',
+      mime: 'image/jpeg',
+      data: imageBase64
+    });
+
+    showMessage('✅ Mobile photo laptop ko bhej di.');
+  });
+
+  // ----------------------------------------------------------
+  // LIVE MOBILE VIDEO + MOBILE MIC LAPTOP PAR
+  // ----------------------------------------------------------
+  startLiveBtn.addEventListener('click', () => {
+    if (!mobileStream) {
+      showMessage('Pehle mobile camera open karein.', true);
+      return;
+    }
+
+    if (!peer) {
+      showMessage('Peer connection ready nahi.', true);
+      return;
+    }
+
+    try {
+      // Mobile ka camera + microphone laptop ko live send hoga
+      liveCall = peer.call(laptopPeerId, mobileStream);
+
+      startLiveBtn.textContent = '🔴 Live Started';
+      startLiveBtn.disabled = true;
+
+      statusEl.textContent = '🔴 LIVE: Camera + Microphone laptop par chal raha hai';
+      showMessage('🔴 Live video aur awaaz laptop ko ja rahi hai.');
+    } catch (error) {
+      showMessage('Live start error: ' + error.message, true);
+    }
+  });
+
+  // ----------------------------------------------------------
+  // CAMERA / LIVE STOP
+  // ----------------------------------------------------------
+  stopCameraBtn.addEventListener('click', () => {
+    if (liveCall) {
+      liveCall.close();
+      liveCall = null;
+    }
+
+    if (mobileStream) {
+      mobileStream.getTracks().forEach(track => track.stop());
+      mobileStream = null;
+    }
+
+    cameraPreview.srcObject = null;
+
+    startCameraBtn.classList.remove('hidden');
+    takePhotoBtn.classList.add('hidden');
+    startLiveBtn.classList.add('hidden');
+    stopCameraBtn.classList.add('hidden');
+
+    startLiveBtn.textContent = '🔴 Start Live Video + Voice';
+    startLiveBtn.disabled = false;
+
+    statusEl.textContent = isConnected()
+      ? '🟢 Connected to Laptop ✅'
+      : '🔴 Laptop disconnected.';
+
+    showMessage('Camera aur live band kar diya.');
+  });
+</script>
+
+</body>
+</html>
