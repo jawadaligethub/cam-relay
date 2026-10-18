@@ -6,8 +6,6 @@
 <title>Bridge to Mobile</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
   body { font-family: -apple-system, sans-serif; }
   .tab-active { background-color: #4f46e5; color: #fff; }
@@ -22,13 +20,13 @@
 
   <div id="invalid-session" class="hidden fixed inset-0 bg-white z-50 flex flex-col items-center justify-center p-6 text-center">
     <div class="text-5xl mb-4">⚠️</div>
-    <h1 class="text-xl font-bold text-gray-800 mb-2">Invalid or Expired Link</h1>
-    <p class="text-gray-500">Please generate a new Bridge link from your laptop.</p>
+    <h1 class="text-xl font-bold text-gray-800 mb-2">Invalid Link</h1>
+    <p class="text-gray-500">Generate a new link from laptop extension.</p>
   </div>
 
   <header class="bg-indigo-600 text-white p-4 shadow-md sticky top-0 z-40">
     <h1 class="text-lg font-bold flex items-center gap-2">🔗 Bridge to Mobile</h1>
-    <p id="session-label" class="text-xs opacity-80">Session: —</p>
+    <p id="status-label" class="text-xs opacity-80">Connecting...</p>
   </header>
 
   <main id="app" class="max-w-md mx-auto p-4 hidden">
@@ -42,21 +40,21 @@
     <!-- TEXT PANEL -->
     <section id="panel-text" class="bg-white rounded-xl shadow p-4 space-y-3">
       <div class="flex justify-between items-center">
-        <label class="font-semibold text-gray-700">Type or Speak Text</label>
+        <label class="font-semibold text-gray-700">Type or Speak</label>
         <button id="mic-toggle" class="bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1.5 rounded-full">🎤 Speak</button>
       </div>
-      <textarea id="text-input" rows="5" placeholder="Type here... or tap Speak"
+      <textarea id="text-input" rows="5" placeholder="Type here..."
         class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
       <button id="send-text-btn" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg active:scale-95 transition">
         🚀 Send Text to Laptop
       </button>
     </section>
 
-    <!-- LIVE STREAM & RECORD PANEL -->
+    <!-- LIVE & RECORD PANEL -->
     <section id="panel-live" class="bg-white rounded-xl shadow p-4 space-y-3 hidden">
-      <label class="font-semibold text-gray-700 block">Live Voice / Video Stream</label>
+      <label class="font-semibold text-gray-700 block">Live Voice / Video</label>
       <video id="live-preview" autoplay playsinline muted></video>
-      <p id="live-status" class="text-center text-sm text-gray-500">Start dabao aur live mic/camera chalu karo</p>
+      <p id="live-status" class="text-center text-sm text-gray-500">Go Live dabao</p>
       
       <div class="flex gap-2">
         <button id="start-live-btn" class="flex-1 bg-green-500 text-white font-bold py-3 rounded-lg active:scale-95 transition">▶️ Go Live</button>
@@ -86,43 +84,43 @@
   <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-3 rounded-full shadow-lg z-50"></div>
 
 <script>
-  // ===============================================================
-  // APNA FIREBASE CONFIG YAHAN PASTE KARO
-  // ===============================================================
-  const firebaseConfig = {
-    apiKey: "YAHAN_APNI_API_KEY",
-    authDomain: "YAHAN_APNA_DOMAIN",
-    databaseURL: "YAHAN_APNA_DATABASE_URL",
-    projectId: "YAHAN_APNA_PROJECT_ID",
-    storageBucket: "YAHAN_APNA_BUCKET",
-    messagingSenderId: "YAHAN_APNI_ID",
-    appId: "YAHAN_APNA_APP_ID"
-  };
-  // ===============================================================
+  const laptopPeerId = new URLSearchParams(location.search).get('id');
+  if (!laptopPeerId) {
+    document.getElementById('invalid-session').classList.remove('hidden');
+  } else {
+    document.getElementById('app').classList.remove('hidden');
+    initBridge();
+  }
 
-  firebase.initializeApp(firebaseConfig);
-  const db = firebase.database();
-
-  const params = new URLSearchParams(window.location.search);
-  const sessionId = params.get('session');
-  const peerId = params.get('id'); // Laptop ka Peer ID
+  let dataConn = null;
+  let liveStream = null;
+  let peer = null;
 
   function showToast(msg, isError = false) {
     const t = document.getElementById('toast'); t.textContent = msg; t.style.background = isError ? '#dc2626' : '#111827';
     t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000);
   }
 
-  async function bootstrap() {
-    if (!sessionId) return showInvalid();
-    const snap = await db.ref('sessions/' + sessionId).once('value');
-    if (!snap.exists()) return showInvalid();
-    document.getElementById('session-label').textContent = 'Session: ' + sessionId;
-    document.getElementById('app').classList.remove('hidden');
+  function initBridge() {
+    peer = new Peer();
+    peer.on('open', () => {
+      // Laptop se Data Connection establish karo (Text & Files ke liye)
+      dataConn = peer.connect(laptopPeerId, { reliable: true });
+      dataConn.on('open', () => {
+        document.getElementById('status-label').textContent = '🟢 Connected to Laptop!';
+        showToast('✅ Connected to Laptop!');
+      });
+      dataConn.on('close', () => {
+        document.getElementById('status-label').textContent = '🔴 Disconnected';
+      });
+    });
+    peer.on('error', (e) => {
+      document.getElementById('status-label').textContent = 'Error: ' + e.type;
+      showToast('Peer Error: ' + e.type, true);
+    });
   }
 
-  function showInvalid(msg) { document.getElementById('invalid-session').classList.remove('hidden'); if (msg) document.querySelector('#invalid-session p').textContent = msg; }
-  bootstrap();
-
+  // Tabs Logic
   document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('tab-active'));
@@ -149,15 +147,15 @@
     else { recognition.stop(); micBtn.textContent = '🎤 Speak'; micBtn.classList.remove('bg-red-100', 'text-red-700'); }
   });
 
-  document.getElementById('send-text-btn').addEventListener('click', async () => {
+  document.getElementById('send-text-btn').addEventListener('click', () => {
     const v = textInput.value.trim(); if (!v) return showToast('Type something first.', true);
-    await db.ref('sessions/' + sessionId + '/payload/text_fields').set({ field_1: v });
-    showToast('✅ Text synced to laptop!');
+    if (dataConn && dataConn.open) {
+      dataConn.send({ type: 'text', value: v });
+      showToast('✅ Text sent!');
+    } else { showToast('Not connected to laptop!', true); }
   });
 
-  // ---- LIVE STREAM & RECORD LOGIC (PeerJS) ----
-  let liveStream = null;
-  let peer = null;
+  // ---- LIVE STREAM & RECORD LOGIC ----
   let mediaRecorder = null;
   let recordedChunks = [];
   let isRecording = false;
@@ -167,17 +165,10 @@
       liveStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: true });
       document.getElementById('live-preview').srcObject = liveStream;
       
-      peer = new Peer();
-      peer.on('open', () => {
-        if (peerId) {
-          const call = peer.call(peerId, liveStream);
-          document.getElementById('live-status').textContent = '🟢 Live! Laptop pe dikh raha hai.';
-          document.getElementById('record-btn').disabled = false;
-        } else {
-          document.getElementById('live-status').textContent = '⚠️ Live peer ID nahi mila.';
-        }
-      });
-      peer.on('error', (e) => { document.getElementById('live-status').textContent = 'Error: ' + e.type; });
+      // Laptop ko Live Stream bhejo (Media Connection)
+      const call = peer.call(laptopPeerId, liveStream);
+      document.getElementById('live-status').textContent = '🟢 Live! Laptop pe dikh raha hai.';
+      document.getElementById('record-btn').disabled = false;
 
       document.getElementById('start-live-btn').classList.add('hidden');
       document.getElementById('stop-live-btn').classList.remove('hidden');
@@ -186,10 +177,9 @@
 
   document.getElementById('stop-live-btn').addEventListener('click', () => {
     if (liveStream) { liveStream.getTracks().forEach(t => t.stop()); liveStream = null; }
-    if (peer) { peer.destroy(); peer = null; }
-    if (isRecording) { mediaRecorder.stop(); isRecording = false; }
+    if (isRecording && mediaRecorder) { mediaRecorder.stop(); isRecording = false; }
     document.getElementById('live-preview').srcObject = null;
-    document.getElementById('live-status').textContent = 'Stream band ho gaya.';
+    document.getElementById('live-status').textContent = 'Stream band.';
     document.getElementById('start-live-btn').classList.remove('hidden');
     document.getElementById('stop-live-btn').classList.add('hidden');
     document.getElementById('record-btn').disabled = true;
@@ -204,9 +194,15 @@
       mediaRecorder.onstop = async () => {
         const blob = new Blob(recordedChunks, { type: 'video/webm' });
         showToast('Processing recording...');
-        const base64 = await blobToBase64(blob);
-        await db.ref('sessions/' + sessionId + '/payload/video_recording').set({ mime_type: 'video/webm', data_base64: base64 });
-        showToast('✅ Recording sent to laptop!');
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = reader.result;
+          if (dataConn && dataConn.open) {
+            dataConn.send({ type: 'video', mime: 'video/webm', data: base64 });
+            showToast('✅ Recording sent to laptop!');
+          }
+        };
+        reader.readAsDataURL(blob);
       };
       mediaRecorder.start();
       isRecording = true;
@@ -218,7 +214,7 @@
       isRecording = false;
       document.getElementById('record-btn').textContent = '⏺️ Start Recording';
       document.getElementById('record-btn').classList.remove('bg-red-600');
-      document.getElementById('live-status').textContent = '🟢 Live! Recording save ho rahi hai...';
+      document.getElementById('live-status').textContent = 'Saving & Sending...';
     }
   });
 
@@ -230,20 +226,23 @@
 
   cameraInput.addEventListener('change', async (e) => {
     const file = e.target.files[0]; if (!file) return;
-    imageBase64 = await blobToBase64(file);
-    imagePreview.src = imageBase64; imagePreview.classList.remove('hidden'); sendImageBtn.disabled = false;
+    const reader = new FileReader();
+    reader.onload = () => {
+      imageBase64 = reader.result;
+      imagePreview.src = imageBase64; imagePreview.classList.remove('hidden'); sendImageBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
   });
 
-  sendImageBtn.addEventListener('click', async () => {
-    if (!imageBase64) return; sendImageBtn.disabled = true; sendImageBtn.textContent = 'Uploading...';
-    await db.ref('sessions/' + sessionId + '/payload/captured_image').set({ mime_type: 'image/jpeg', data_base64: imageBase64 });
-    sendImageBtn.textContent = '✅ Sent!'; showToast('✅ Photo synced!');
-    setTimeout(() => { sendImageBtn.textContent = '🚀 Send Photo to Laptop'; sendImageBtn.disabled = false; }, 2000);
+  sendImageBtn.addEventListener('click', () => {
+    if (!imageBase64) return;
+    if (dataConn && dataConn.open) {
+      sendImageBtn.disabled = true; sendImageBtn.textContent = 'Sending...';
+      dataConn.send({ type: 'image', mime: 'image/jpeg', data: imageBase64 });
+      showToast('✅ Photo sent to laptop!');
+      setTimeout(() => { sendImageBtn.textContent = '🚀 Send Photo to Laptop'; sendImageBtn.disabled = false; }, 2000);
+    } else { showToast('Not connected!', true); }
   });
-
-  function blobToBase64(blob) {
-    return new Promise((resolve, reject) => { const r = new FileReader(); r.onloadend = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(blob); });
-  }
 </script>
 </body>
 </html>
